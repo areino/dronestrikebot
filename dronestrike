@@ -1,0 +1,9 @@
+#!/bin/bash 
+
+echo Starting loop...
+while true; do
+	python dronestrike.py
+	echo Exited. Sleeping for 5 min before restart.
+	sleep 300
+done
+
