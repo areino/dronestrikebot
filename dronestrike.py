@@ -3,23 +3,28 @@
 import twitter
 import string
 import os.path
+import os
+import random
 import time
 import sys
-from time import gmtime, strftime
+from   time import gmtime, strftime
+
 
 # Initialization variables
 CONSUMER_KEY        = ''
 CONSUMER_SECRET     = ''
 ACCESS_TOKEN_KEY    = ''
 ACCESS_TOKEN_SECRET = ''
+
 FILE_LASTID         = 'lastid.txt'
 FILE_LASTDM         = 'lastdm.txt'
 FILE_LASTSTRIKES    = 'laststrikes.txt'
 FILE_DEBUG          = 'debug.log'
-MINIMUM_DELAY       = 360 # Seconds to wait for same user to order new strike
-LOOP_DELAY          = 90 # Seconds to wait after each loop
-FETCH_FOLLOWERS     = 10 # Update follower list every n loops
-COMMANDER           = '' # Lowercase screen name (without @) of user who can send commands by DM
+
+MINIMUM_DELAY       = 3600*2 # Cool off period after each users' strike
+LOOP_DELAY          = 90 # Wait n seconds between iteration (to avoid rate limits)
+FETCH_FOLLOWERS     = 10 # Update follower list every n loops (to avoid rate limits)
+COMMANDER           = "margaretcastor" # This user can send DM commands
 
 
 # Connecting to Twitter API
@@ -120,12 +125,64 @@ def logLastStrike(userid, seconds, username):
 	with open(FILE_LASTSTRIKES, "a") as f:
 		f.write (str(userid) + "," + str(seconds) + "," + username + "\n")
 
+# Load images to use in strikes to array (strike*.jpg or strike*.gif in local folder)
+def loadImages():
+        global images
+        for file in os.listdir("./"):
+                if (file.find("strike")==0) and (file.find(".gif")>0 or file.find(".jpg")>0):
+                        images.append(file)
+
+# Return random image from the available ones
+def getRandomImage():
+        global images
+        l = len(images)
+        return(images[random.randint(0,l-1)])
+
+
+# Apply target selection rules
+def validateTarget(targetuserid, attackeruserid):
+	targetuser = api.GetUser(user_id=targetuserid)
+        validate = True
+        if targetuser.screen_name == "dronestrikebot" or targetuser.screen_name == "imperioargenbot":
+                validate = False
+                writeLog("-- User @" + targetuser.screen_name + " excluded. Bots.")
+        if targetuser.id == attackeruserid:
+                validate = False
+                writeLog("-- User @" + targetuser.screen_name + " excluded. Self.")
+        if targetuser.followers_count>10000:
+                validate = False
+                writeLog("-- User @" + targetuser.screen_name + " excluded. Too many followers.")
+        if targetuser.protected:
+                validate = False
+                writeLog("-- User @" + targetuser.screen_name + " excluded. Protected profile.")
+        if targetuser.verified:
+                validate = False
+                writeLog("-- User @" + targetuser.screen_name + " excluded. Verified profile.")
+        if validate:
+                # Get target's followers and check if attacker is one of them
+                nextcursor = -1
+                found = 0
+                while not nextcursor == 0: 
+                        targetfollowers = api.GetFollowerIDsPaged(user_id=targetuser.id, cursor=nextcursor)
+                        nextcursor = targetfollowers[0]
+                        if attackeruserid in targetfollowers[2]:
+                                found = 1
+                                break
+                if found == 0:
+                        validate = False
+                        writeLog("-- User @" + targetuser.screen_name + " excluded. Not following attacker.")
+        return(validate)
+
+
 
 writeLog("Main loop starting...")
 
+images = []
 loops = 0
 followers = api.GetFollowers()
 writeLog("Updating follower list")
+
+loadImages()
 
 while True:
 	# Avoid fetching followers in every loop due to rate limiting
@@ -136,12 +193,10 @@ while True:
 		writeLog("Updating follower list")
 
 	processCC()
-	time.sleep(LOOP_DELAY)
-	writeLog("Tick")
 
 	# Fetch last mentions to self since last one fetched
 	lastid = getLastID()
-	writeLog("Previous status ID fetched was " + str(lastid))
+	# writeLog("Previous status ID fetched was " + str(lastid))
 	newlastid = 0
 	for mention in api.GetMentions(count=10, since_id=lastid, trim_user=False):
 		mentionid = mention.id
@@ -154,10 +209,8 @@ while True:
 		created = int(mention.created_at_in_seconds)
 		usersmentioned = mention.user_mentions
 
-		writeLog("Fetched status ID " + str(mentionid))
-		writeLog("-- Text:    " + text)
-		writeLog("-- User:    " + username + " [" + str(userid) + "]")
-		writeLog("-- Created: " + str(created))
+		writeLog("Fetched " + str(mentionid) + " from @" + username)
+	#	writeLog("-- Text:    " + text)
 
 		if (not username=="dronestrike") and isFollower(userid):
 			writeLog("-- @" + username + " is a follower")
@@ -170,26 +223,26 @@ while True:
 				striketext = ""
 				for u in usersmentioned:
 					if (not u.id == userid) and (not u.screen_name=="dronestrikebot"):
-						striketext = striketext + "@" + u.screen_name + " "
+						if validateTarget(u.id, mention.user.id):
+							striketext = striketext + "@" + u.screen_name + " "
 				writeLog("-- Targets: " + striketext)
 
 				post1 = api.PostUpdate(striketext + "drone strike ordered by @" + username, in_reply_to_status_id=mentionid)
 				time.sleep(5)
-				api.PostMedia(striketext, 'dronestrike.jpg', in_reply_to_status_id=str(post1.id))
+				api.PostMedia(striketext, getRandomImage(), in_reply_to_status_id=str(post1.id))
 				logLastStrike(userid, created, username)
-				writeLog("-- Strike ends.")
 			else:
 				writeLog("-- Only " + str(period) + " seconds since last one. Need " + str(MINIMUM_DELAY))
 				writeLog("-- Ignoring")
 		else:
-			writeLog("-- @" + username + " is not a follower (or it's ourselves!)")
-			writeLog("-- Ignoring")
+			writeLog("-- Ignoring, @" + username + " is not a follower (or it's ourselves!)")
 
 	if newlastid > lastid:
 		setLastID(newlastid)
-		writeLog("New last ID is " + str(newlastid))
+		# writeLog("New last ID is " + str(newlastid))
 
-
+	time.sleep(LOOP_DELAY)
+	writeLog("Tick")
 
 
 
