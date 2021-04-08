@@ -24,7 +24,7 @@ FILE_DEBUG          = 'debug.log'
 MINIMUM_DELAY       = 3600*2 # Cool off period after each users' strike
 LOOP_DELAY          = 90 # Wait n seconds between iteration (to avoid rate limits)
 FETCH_FOLLOWERS     = 10 # Update follower list every n loops (to avoid rate limits)
-COMMANDER           = "margaretcastor" # This user can send DM commands
+COMMANDER           = "" # This user can send DM commands
 
 
 # Connecting to Twitter API
